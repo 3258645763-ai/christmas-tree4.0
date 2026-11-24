@@ -1,0 +1,307 @@
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+	<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Merry Christmas · 旋转 3D 圣诞树</title>
+	<!-- 对应 R 中的 font_add_google("Great Vibes", "christmas_font") -->
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap" rel="stylesheet">
+	<style>
+	  * { box-sizing: border-box; }
+	  html, body {
+	    margin: 0; height: 100%;
+	    background: radial-gradient(ellipse at 50% 15%, #17171f, #060608 75%);
+	    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+	    color: #cfcfcf; overflow: hidden;
+	  }
+	  #wrap {
+	    height: 100%;
+	    display: flex; flex-direction: column;
+	    align-items: center; justify-content: center; gap: 12px;
+	  }
+	  #title { font-size: 14px; letter-spacing: 3px; color: #b99a4f; }
+	  #controls {
+	    display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 0 12px;
+	  }
+	  .btn {
+	    padding: 6px 14px; border-radius: 999px; cursor: pointer;
+	    border: 1px solid rgba(255,255,255,.16);
+	    background: rgba(255,255,255,.05); color: #c9c9c9; font-size: 13px;
+	    transition: background .15s, color .15s, border-color .15s;
+	    user-select: none;
+	  }
+	  .btn:hover { background: rgba(255,255,255,.14); color: #fff; }
+	  .btn.active { background: #d9b45c; border-color: #d9b45c; color: #241703; font-weight: 600; }
+	  canvas {
+	    display: block; border-radius: 14px;
+	    box-shadow: 0 20px 70px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.05);
+	    max-width: 94vw; max-height: calc(100vh - 180px);
+	  }
+	  #hint { font-size: 12px; color: #7d7d85; }
+	</style>
+	</head>
+	<body>
+	<div id="wrap">
+	  <div id="title">✦ Merry Christmas · 旋转圣诞树 ✦</div>
+	  <div id="controls"></div>
+	  <canvas id="cv" width="600" height="750"></canvas>
+	  <div id="hint">点击按钮或按数字键 1–6 切换风格 · 空格键暂停/继续</div>
+	</div>
+	<script>
+	"use strict";
+	/* ===================== 六种风格(与 R 的 styles 列表一一对应) ===================== */
+	const STYLES = [
+	  { name:"1 · 金色经典", bg:"#0f0505",
+	    tree:["#0B3D0B","#144514","#006400"], trunk:"#3e2723",
+	    decor:["#FFD700","#CCA43B","#8B0000"], star:"#FFD700", text:"#FFD700", snow:"white",
+	    ribbon:true, ribbonCol:"#D4AF37", ribbonWidth:1.5 },
+	  { name:"2 · 冰霜银蓝", bg:"#F0F2F5",
+	    tree:["#2F4F4F","#5F9EA0","#708090"], trunk:"#696969",
+	    decor:["#B0C4DE","#FFFAF0","#E0FFFF"], star:"#B0C4DE", text:"#708090", snow:"#87CEFA",
+	    ribbon:true, ribbonCol:"#B0C4DE", ribbonWidth:1.5 },
+	  { name:"3 · 田园暖木", bg:"#1a1a1a",
+	    tree:["#556B2F","#6B8E23","#808000"], trunk:"#5D4037",
+	    decor:["#CD853F","#FFCC00"], star:"#FFCC00", text:"#DEB887", snow:"white",
+	    ribbon:false, ribbonCol:null, ribbonWidth:0 },
+	  { name:"4 · 缤纷彩灯", bg:"#101010",
+	    tree:["#006400","#228B22"], trunk:"#4E342E",
+	    decor:["#FF0000","#00FF00","#0000FF","#FFFF00"], star:"#FFD700", text:"#FF6347", snow:"white",
+	    ribbon:true, ribbonCol:"#C0C0C0", ribbonWidth:1.0 },
+	  { name:"5 · 黑白默片", bg:"#000000",
+	    tree:["#111111","#050505"], trunk:"#222222",
+	    decor:["#FFFFFF","#FFFFE0"], star:"#FFFFFF", text:"#FFFFFF", snow:"gray30",
+	    ribbon:true, ribbonCol:"#FFFFFF", ribbonWidth:0.8 },
+	  { name:"6 · 粉色浪漫", bg:"#1F0F12",
+	    tree:["#D87093","#FF69B4","#FFB6C1"], trunk:"#4A3728",
+	    decor:["#FFFFFF","#FFD700","#FF1493"], star:"#FFD700", text:"#FFC0CB", snow:"#FFF0F5",
+	    ribbon:true, ribbonCol:"#F8F8FF", ribbonWidth:0.8 }
+	];
+	/* ===================== 常量(与 R 保持一致) ===================== */
+	let currentStyleId = 1;          // 【在此切换风格 1-6】(也可点按钮 / 按数字键)
+	const N_FRAMES = 90;             // 旋转一圈 = 90 帧
+	const FPS      = 24;             // 原动画帧率(一圈 3.75 秒)
+	const N_TRUNK = 1000, N_LEAVES = 8000, N_DECOR = 600, N_RIBBON = 6000, N_SNOW = 250;
+	const TAU = Math.PI * 2;
+	/* ===================== 工具函数 ===================== */
+	const NAMED = { white:"#FFFFFF", "gray30":"#4D4D4D" };   // R 颜色名 → 十六进制
+	const css = c => NAMED[c] || c;
+	function hexToRgb(c){
+	  let h = css(c).replace("#", "");
+	  if (h.length === 3) h = h.split("").map(ch => ch + ch).join("");
+	  return [ parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16) ];
+	}
+	/* 固定种子随机数,作用等同 set.seed(2025):刷新/换风格,树形都一致 */
+	function mulberry32(seed){
+	  let a = seed >>> 0;
+	  return function(){
+	    a |= 0; a = (a + 0x6D2B79F5) | 0;
+	    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+	    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+	    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	  };
+	}
+	/* R 的 %% 运算(结果恒为非负) */
+	const mod = (a, m) => ((a % m) + m) % m;
+	/* 五角星顶点 —— 对应 get_star_polygon() */
+	function starPolygon(cx, cy, r){
+	  const pts = [];
+	  for (let i = 0; i < 10; i++){
+	    const ang = Math.PI / 2 + i * Math.PI / 5;     // 从正上方开始,每 36° 一个顶点
+	    const rad = (i % 2 === 0) ? r : r * 0.4;       // 外 / 内半径交替
+	    pts.push([cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)]);
+	  }
+	  return pts;
+	}
+	/* 每种颜色预渲染一张圆形贴图(替代 geom_point 的 shape=19,大幅提速) */
+	function makeCircleSprite(rgb){
+	  const s = document.createElement("canvas");
+	  s.width = s.height = 64;
+	  const g = s.getContext("2d");
+	  g.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+	  g.beginPath(); g.arc(32, 32, 31, 0, TAU); g.fill();
+	  return s;
+	}
+	/* ===================== 画布(对应 animate 的 600×750) ===================== */
+	const cv  = document.getElementById("cv");
+	const ctx = cv.getContext("2d");
+	const W = 600, H = 750;
+	const dpr = Math.min(window.devicePixelRatio || 1, 2);   // 高清屏适配
+	cv.width = W * dpr; cv.height = H * dpr;
+	ctx.scale(dpr, dpr);
+	/* 坐标映射 —— 对应 coord_fixed(xlim=c(-0.8,0.8), ylim=c(-0.8,0.9)) */
+	const SCALE = W / 1.6;
+	const TOP = 0.9;
+	const yTop = (H - 1.7 * SCALE) / 2;                // 纵向居中
+	const toX = x => W / 2 + x * SCALE;
+	const toY = y => yTop + (TOP - y) * SCALE;         // 画布 y 轴向下,需翻转
+	const fontPx = Math.round(0.125 * SCALE);          // 约等于 R 中 size = 12 (mm)
+	/* 星星是静态的(和 R 一样不随树旋转):中心 (0,0.4),半径 0.03 */
+	const starPath = starPolygon(0, 0.4, 0.03).map(([x, y]) => [toX(x), toY(y)]);
+	/* ===================== 生成粒子(对应 generate_tree_data + generate_snow) ===================== */
+	let cfg = null, sprites = [], pts = [];
+	let bgCol = "#000", starCol = "#fff", textCol = "#fff";
+	function buildData(styleIdx){
+	  cfg = STYLES[styleIdx];
+	  bgCol = css(cfg.bg); starCol = css(cfg.star); textCol = css(cfg.text);
+	  const colorMap = new Map();                      // 颜色 → 贴图索引
+	  const idx = c => {
+	    const k = css(c);
+	    if (!colorMap.has(k)) colorMap.set(k, colorMap.size);
+	    return colorMap.get(k);
+	  };
+	  const rand = mulberry32(2025);                   // set.seed(2025)
+	  pts = [];
+	  const add = (x, y, z, ci, size, alpha, snow, speed) =>
+	    pts.push({ x, y, z, ci, size, alpha, snow: !!snow, speed: speed || 0,
+	               d: 0, px: 0, py: 0, rad: 0, av: 0 });
+	  /* ---- 树干:1000 点,圆柱 r=0.12,y∈(-0.7,-0.45) ---- */
+	  for (let i = 0; i < N_TRUNK; i++){
+	    const h = -0.7 + rand() * 0.25, th = rand() * TAU;
+	    add(0.12 * Math.cos(th), h, 0.12 * Math.sin(th), idx(cfg.trunk), 1.2, 1, false);
+	  }
+	  /* ---- 树叶:8000 点,半径随高度收缩,带 7 层锯齿 ---- */
+	  for (let i = 0; i < N_LEAVES; i++){
+	    const h  = rand();
+	    const lc = (h * 7) % 1;
+	    const r  = (1 - h) * 0.65 * (0.4 + 0.6 * Math.pow(1 - lc, 0.7));
+	    const th = rand() * TAU;
+	    add(r * Math.cos(th), h - 0.5, r * Math.sin(th),
+	        idx(cfg.tree[(rand() * cfg.tree.length) | 0]), 0.6 + rand() * 1.2, 0.95, false);
+	  }
+	  /* ---- 装饰彩球:600 点,比树叶略靠外(×0.68) ---- */
+	  for (let i = 0; i < N_DECOR; i++){
+	    const h  = rand() * 0.95;
+	    const lc = (h * 7) % 1;
+	    const r  = (1 - h) * 0.68 * (0.4 + 0.6 * Math.pow(1 - lc, 0.7));
+	    const th = rand() * TAU;
+	    add(r * Math.cos(th), h - 0.5, r * Math.sin(th),
+	        idx(cfg.decor[(rand() * cfg.decor.length) | 0]), 2 + rand() * 2, 1, false);
+	  }
+	  /* ---- 螺旋彩带:6000 点,缠绕 4.75 圈(θ = 10πh) ---- */
+	  if (cfg.ribbon){
+	    const ci = idx(cfg.ribbonCol);
+	    for (let i = 0; i < N_RIBBON; i++){
+	      const h  = 0.95 * i / (N_RIBBON - 1);
+	      const r  = (1 - h) * 0.65 * 1.05;
+	      const th = 10 * Math.PI * h;
+	      add(r * Math.cos(th), h - 0.5, r * Math.sin(th), ci, cfg.ribbonWidth, 1, false);
+	    }
+	  }
+	  /* ---- 雪:250 片,速度 0.015~0.035/帧 ---- */
+	  const sci = idx(cfg.snow);
+	  for (let i = 0; i < N_SNOW; i++){
+	    add(-1 + rand() * 2, -0.8 + rand() * 2, -1 + rand() * 2,
+	        sci, 0.5 + rand() * 1.5, 0.5 + rand() * 0.4, true, 0.015 + rand() * 0.02);
+	  }
+	  /* 所有颜色统一生成圆形贴图 */
+	  sprites = Array.from(colorMap.keys(), k => makeCircleSprite(hexToRgb(k)));
+	}
+	/* ===================== 渲染一帧(对应 process_frame + ggplot 绘图) ===================== */
+	function render(){
+	  /* 背景色,对应 theme 的 plot.background */
+	  ctx.fillStyle = bgCol;
+	  ctx.fillRect(0, 0, W, H);
+	  /* 旋转角度:一圈 90 帧 */
+	  const angle = TAU * (frame / N_FRAMES);
+	  const ca = Math.cos(angle), sa = Math.sin(angle);
+	  /* 旋转 + 透视投影,公式与 R 完全一致 */
+	  for (let i = 0; i < pts.length; i++){
+	    const p = pts[i];
+	    let xr, zr, yy;
+	    if (p.snow){                                   /* 雪不旋转,只下落并循环 */
+	      xr = p.x; zr = p.z;
+	      yy = -0.8 + mod(p.y - frame * p.speed + 0.8, 2);
+	    } else {                                       /* 树绕 y 轴旋转 */
+	      xr = p.x * ca - p.z * sa;
+	      zr = p.z * ca + p.x * sa;
+	      yy = p.y;
+	    }
+	    const d = 1 / (2.5 - zr);                      /* 深度 */
+	    p.d   = d;
+	    p.px  = xr * d * 2;                            /* 投影坐标 */
+	    p.py  = yy * d * 2;
+	    p.rad = p.size * d * 3;                        /* 点大小:近大远小 */
+	    p.av  = p.snow ? p.alpha                       /* 雪:透明度不变 */
+	                   : p.alpha * (zr + 1.2) / 2.2;   /* 树:越靠前越亮 */
+	  }
+	  /* 画家算法:按深度从远到近排序绘制 —— 对应 arrange(depth) */
+	  pts.sort((a, b) => a.d - b.d);
+	  for (let i = 0; i < pts.length; i++){
+	    const p = pts[i];
+	    if (p.px < -0.82 || p.px > 0.82) continue;     /* xlim 裁剪 */
+	    if (p.av <= 0.02) continue;
+	    ctx.globalAlpha = p.av > 1 ? 1 : p.av;
+	    const rx = W / 2 + p.px * SCALE;
+	    const ry = yTop + (TOP - p.py) * SCALE;
+	    ctx.drawImage(sprites[p.ci], rx - p.rad, ry - p.rad, p.rad * 2, p.rad * 2);
+	  }
+	  ctx.globalAlpha = 1;
+	  /* 顶部五角星 —— 对应 geom_polygon(fill=star_col, color="white") */
+	  ctx.beginPath();
+	  for (let i = 0; i < starPath.length; i++){
+	    const s = starPath[i];
+	    i === 0 ? ctx.moveTo(s[0], s[1]) : ctx.lineTo(s[0], s[1]);
+	  }
+	  ctx.closePath();
+	  ctx.fillStyle = starCol;
+	  ctx.strokeStyle = "#FFFFFF";
+	  ctx.lineWidth = 1;
+	  ctx.fill();
+	  ctx.stroke();
+	  /* 文字 —— 对应 annotate("text", "Merry Christmas") */
+	  ctx.font = `${fontPx}px "Great Vibes", cursive`;
+	  ctx.textAlign = "center";
+	  ctx.textBaseline = "middle";
+	  ctx.fillStyle = textCol;
+	  ctx.fillText("Merry Christmas", toX(0), toY(0.6));
+	}
+	/* ===================== 动画循环(对应 animate + transition_manual) ===================== */
+	let frame = 0, lastT = performance.now(), paused = false;
+	function loop(t){
+	  requestAnimationFrame(loop);
+	  const dt = Math.min(t - lastT, 100);
+	  lastT = t;
+	  if (!paused) frame += dt / 1000 * FPS;           /* 按 24fps 推进虚拟帧号 */
+	  render();
+	}
+	/* ===================== 界面:风格按钮 / 键盘 ===================== */
+	const ctrl = document.getElementById("controls");
+	const btns = STYLES.map((s, i) => {
+	  const b = document.createElement("button");
+	  b.className = "btn";
+	  b.textContent = s.name;
+	  b.addEventListener("click", () => selectStyle(i + 1));
+	  ctrl.appendChild(b);
+	  return b;
+	});
+	const pauseBtn = document.createElement("button");
+	pauseBtn.className = "btn";
+	pauseBtn.textContent = "⏸ 暂停";
+	pauseBtn.addEventListener("click", () => {
+	  paused = !paused;
+	  pauseBtn.textContent = paused ? "▶ 继续" : "⏸ 暂停";
+	});
+	ctrl.appendChild(pauseBtn);
+	function selectStyle(id){
+	  currentStyleId = id;
+	  buildData(id - 1);
+	  btns.forEach((b, i) => b.classList.toggle("active", i === id - 1));
+	}
+	/* 数字键 1-6 切风格,空格暂停 */
+	window.addEventListener("keydown", e => {
+	  const n = parseInt(e.key, 10);
+	  if (n >= 1 && n <= STYLES.length) selectStyle(n);
+	  else if (e.key === " " || e.code === "Space"){ paused = !paused; e.preventDefault(); }
+	});
+	/* 预加载手写字体(断网时自动回退系统手写体) */
+	if (document.fonts && document.fonts.load){
+	  document.fonts.load(`${fontPx}px "Great Vibes"`).catch(() => {});
+	}
+	/* ===================== 启动 ===================== */
+	selectStyle(currentStyleId);
+	requestAnimationFrame(loop);
+	</script>
+	</body>
+	</html>
